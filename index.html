@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State-Space Life Model</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#050a14; color:#c8d8f0; font-family:'Courier New',monospace; overflow:hidden; }
+#canvas-container { position:fixed; top:0; left:0; width:100%; height:100%; }
+
+/* LEFT PANEL */
+#left-panel { position:fixed; top:0; left:0; width:220px; height:100vh; background:rgba(5,12,25,0.88); border-right:1px solid rgba(80,160,255,0.2); padding:16px; z-index:10; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+
+/* RIGHT PANEL */
+#ui { position:fixed; top:0; right:0; width:280px; height:100vh; background:rgba(5,12,25,0.92); border-left:1px solid rgba(80,160,255,0.2); padding:16px; overflow-y:auto; z-index:10; display:flex; flex-direction:column; gap:12px; }
+
+.panel-title { font-size:10px; letter-spacing:3px; color:#4a9eff; text-transform:uppercase; border-bottom:1px solid rgba(74,158,255,0.3); padding-bottom:6px; margin-bottom:4px; }
+.metric-row { display:flex; justify-content:space-between; align-items:center; padding:3px 0; }
+.metric-label { font-size:10px; color:#6a8ab0; letter-spacing:1px; }
+.metric-value { font-size:12px; color:#7df0c0; font-weight:bold; }
+.state-vector { background:rgba(74,158,255,0.06); border:1px solid rgba(74,158,255,0.15); border-radius:4px; padding:8px; }
+.sv-row { display:flex; justify-content:space-between; padding:2px 0; }
+.sv-key { font-size:11px; color:#4a9eff; }
+.sv-val { font-size:11px; color:#eef4ff; }
+.slider-group { display:flex; flex-direction:column; gap:8px; }
+.slider-row { display:flex; flex-direction:column; gap:3px; }
+.slider-header { display:flex; justify-content:space-between; }
+.slider-label { font-size:10px; color:#8ab0d0; letter-spacing:1px; }
+.slider-val { font-size:10px; color:#7df0c0; }
+input[type=range] { width:100%; height:3px; -webkit-appearance:none; background:rgba(74,158,255,0.2); border-radius:2px; outline:none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:#4a9eff; cursor:pointer; box-shadow:0 0 6px rgba(74,158,255,0.8); }
+.btn-row { display:flex; gap:6px; }
+button { flex:1; padding:8px 4px; background:rgba(74,158,255,0.1); border:1px solid rgba(74,158,255,0.3); color:#4a9eff; font-family:'Courier New',monospace; font-size:10px; letter-spacing:2px; cursor:pointer; border-radius:3px; transition:all 0.2s; text-transform:uppercase; }
+button:hover { background:rgba(74,158,255,0.25); box-shadow:0 0 10px rgba(74,158,255,0.3); }
+button.active { background:rgba(74,158,255,0.3); color:#7df0ff; border-color:#4a9eff; }
+.mode-btn { font-size:9px; }
+
+/* LIFE ARC BAR */
+#life-arc-panel { position:fixed; bottom:0; left:220px; right:280px; z-index:15; padding:12px 24px 14px; background:rgba(5,10,20,0.92); border-top:1px solid rgba(74,158,255,0.15); }
+#life-arc-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; }
+#phase-label { font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:bold; transition:color 0.8s; }
+#age-pct { font-size:11px; color:#6a8ab0; letter-spacing:2px; }
+#life-bar-track { height:8px; background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden; position:relative; }
+#life-bar-fill { height:100%; width:0%; border-radius:4px; transition:width 0.2s, background 0.8s; }
+#generation-row { display:flex; justify-content:space-between; margin-top:6px; }
+.gen-dot-row { display:flex; gap:5px; align-items:center; }
+.gen-dot { width:7px; height:7px; border-radius:50%; background:rgba(74,158,255,0.3); border:1px solid rgba(74,158,255,0.4); transition:all 0.4s; }
+.gen-dot.lived { background:#4a9eff; box-shadow:0 0 5px rgba(74,158,255,0.7); }
+#gen-label { font-size:9px; color:#3a6a9a; letter-spacing:2px; }
+#phase-milestones { display:flex; justify-content:space-between; margin-top:4px; }
+.milestone { font-size:8px; letter-spacing:1px; color:#2a4a6a; text-transform:uppercase; }
+.milestone.active { color:#7df0c0; }
+
+/* PHASE FLASH OVERLAY */
+#phase-flash { position:fixed; inset:0; z-index:50; pointer-events:none; opacity:0; display:flex; align-items:center; justify-content:center; transition:opacity 0.4s; }
+#phase-flash-text { font-size:28px; letter-spacing:8px; text-transform:uppercase; text-shadow:0 0 40px currentColor; }
+
+/* TITLE */
+#title-overlay { position:fixed; top:16px; left:50%; transform:translateX(-50%); text-align:center; z-index:10; pointer-events:none; }
+#title-overlay h1 { font-size:13px; letter-spacing:4px; color:#4a9eff; text-transform:uppercase; text-shadow:0 0 20px rgba(74,158,255,0.6); }
+#title-overlay p { font-size:9px; color:#3a6a9a; letter-spacing:2px; margin-top:3px; }
+
+.formula { background:rgba(74,158,255,0.04); border:1px solid rgba(74,158,255,0.1); border-radius:4px; padding:8px; font-size:9px; color:#5a8ab0; line-height:1.6; }
+.legend-row { display:flex; align-items:center; gap:6px; padding:2px 0; }
+.legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.legend-text { font-size:9px; color:#6a8ab0; }
+
+/* INFO OVERLAY */
+#info-overlay { display:none; position:fixed; inset:0; z-index:100; background:rgba(3,7,16,0.97); overflow-y:auto; padding:32px 24px 60px; }
+#info-overlay.open { display:block; }
+#info-close { position:sticky; top:0; float:right; background:rgba(74,158,255,0.12); border:1px solid rgba(74,158,255,0.35); color:#4a9eff; font-family:'Courier New',monospace; font-size:11px; letter-spacing:2px; padding:7px 16px; cursor:pointer; border-radius:3px; }
+.info-wrap { max-width:780px; margin:0 auto; }
+.info-hero { text-align:center; margin-bottom:36px; }
+.info-hero h1 { font-size:22px; letter-spacing:5px; color:#4a9eff; text-transform:uppercase; }
+.info-hero p { font-size:11px; color:#3a6a9a; letter-spacing:3px; margin-top:6px; }
+.info-section { margin-bottom:28px; }
+.info-section h2 { font-size:12px; letter-spacing:3px; color:#7df0c0; text-transform:uppercase; border-bottom:1px solid rgba(125,240,192,0.2); padding-bottom:7px; margin-bottom:12px; }
+.info-section p, .info-section li { font-size:12px; color:#8aaac8; line-height:1.85; }
+.info-section ul { padding-left:18px; }
+.info-section li { margin-bottom:5px; }
+.info-section li b, .info-section p b { color:#c8d8f0; }
+.eq-box { background:rgba(74,158,255,0.05); border:1px solid rgba(74,158,255,0.18); border-radius:6px; padding:12px 16px; margin:10px 0; font-size:13px; color:#eef4ff; letter-spacing:1px; line-height:2; }
+.eq-box .eq-note { font-size:10px; color:#4a7a9a; display:block; margin-top:2px; }
+.card-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+.card { background:rgba(74,158,255,0.05); border:1px solid rgba(74,158,255,0.14); border-radius:6px; padding:12px; }
+.card-title { font-size:11px; letter-spacing:2px; color:#4a9eff; margin-bottom:6px; text-transform:uppercase; }
+.card p { font-size:11px; color:#7a9ab8; line-height:1.7; }
+.tag { display:inline-block; font-size:9px; padding:2px 7px; border-radius:10px; margin-bottom:5px; letter-spacing:1px; }
+.tag-e { background:rgba(255,68,102,0.15); color:#ff6680; border:1px solid rgba(255,68,102,0.3); }
+.tag-i { background:rgba(68,255,136,0.12); color:#44ff88; border:1px solid rgba(68,255,136,0.25); }
+.tag-s { background:rgba(68,136,255,0.12); color:#4488ff; border:1px solid rgba(68,136,255,0.25); }
+.tag-c { background:rgba(255,200,68,0.12); color:#ffcc44; border:1px solid rgba(255,200,68,0.25); }
+.phase-table { width:100%; border-collapse:collapse; margin-top:10px; }
+.phase-table th { font-size:9px; letter-spacing:2px; color:#4a9eff; text-align:left; padding:6px 10px; border-bottom:1px solid rgba(74,158,255,0.2); }
+.phase-table td { font-size:11px; color:#7a9ab8; padding:7px 10px; border-bottom:1px solid rgba(255,255,255,0.04); line-height:1.5; }
+.phase-table td:first-child { color:#c8d8f0; font-weight:bold; }
+.se-row { display:flex; gap:12px; align-items:flex-start; padding:8px 12px; background:rgba(255,255,255,0.02); border-radius:5px; border-left:3px solid rgba(74,158,255,0.3); margin-bottom:7px; }
+.se-name { min-width:155px; font-size:10px; letter-spacing:1px; color:#4a9eff; text-transform:uppercase; padding-top:2px; }
+.se-desc { font-size:11px; color:#7a9ab8; line-height:1.65; }
+#btn-info-open { position:fixed; bottom:70px; left:50%; transform:translateX(-50%); z-index:20; padding:9px 24px; background:rgba(74,158,255,0.1); border:1px solid rgba(74,158,255,0.35); color:#4a9eff; font-family:'Courier New',monospace; font-size:10px; letter-spacing:3px; cursor:pointer; border-radius:4px; text-transform:uppercase; transition:all 0.2s; }
+#btn-info-open:hover { background:rgba(74,158,255,0.25); }
+#compare-info { font-size:9px; color:#5a7a9a; line-height:1.5; padding:6px 8px; background:rgba(74,158,255,0.04); border-radius:4px; border:1px solid rgba(74,158,255,0.1); }
+</style>
+</head>
+<body>
+<div id="canvas-container"></div>
+
+<div id="title-overlay">
+  <h1>State-Space Life Model</h1>
+  <p>X(t+1) = F(Xt, Ut, Kt) — Constraint-Driven Trajectory</p>
+</div>
+
+<!-- PHASE FLASH -->
+<div id="phase-flash"><span id="phase-flash-text"></span></div>
+
+<!-- LEFT PANEL -->
+<div id="left-panel">
+  <div class="panel-title">System State</div>
+  <div class="state-vector">
+    <div class="sv-row"><span class="sv-key">E (Energy)</span><span class="sv-val" id="sv-e">0.000</span></div>
+    <div class="sv-row"><span class="sv-key">I (Information)</span><span class="sv-val" id="sv-i">0.000</span></div>
+    <div class="sv-row"><span class="sv-key">S (Entropy)</span><span class="sv-val" id="sv-s">0.000</span></div>
+    <div class="sv-row"><span class="sv-key">C (Constraint)</span><span class="sv-val" id="sv-c">0.000</span></div>
+  </div>
+
+  <div class="panel-title">Metrics</div>
+  <div class="metric-row"><span class="metric-label">TRAJECTORY L</span><span class="metric-value" id="m-traj">0.000</span></div>
+  <div class="metric-row"><span class="metric-label">TRANSITIONS</span><span class="metric-value" id="m-trans">0</span></div>
+  <div class="metric-row"><span class="metric-label">AVG MAGNITUDE</span><span class="metric-value" id="m-avg">0.000</span></div>
+  <div class="metric-row"><span class="metric-label">CURRENT |ΔX|</span><span class="metric-value" id="m-cur">0.000</span></div>
+  <div class="metric-row"><span class="metric-label">ENTROPY RATE</span><span class="metric-value" id="m-ent">0.000</span></div>
+  <div class="metric-row"><span class="metric-label">GENERATION</span><span class="metric-value" id="m-gen">1</span></div>
+  <div class="metric-row"><span class="metric-label">BEST L (ALL TIME)</span><span class="metric-value" id="m-best">0.000</span></div>
+
+  <div class="panel-title">Age Color Guide</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#4a9eff"></div><span class="legend-text">Birth — young, ordered</span></div>
+  <div class="legend-row"><div class="legend-dot" style="background:#44ffaa"></div><span class="legend-text">Growth — expanding</span></div>
+  <div class="legend-row"><div class="legend-dot" style="background:#ffe066"></div><span class="legend-text">Peak — maximum vitality</span></div>
+  <div class="legend-row"><div class="legend-dot" style="background:#ff8844"></div><span class="legend-text">Decline — losing energy</span></div>
+  <div class="legend-row"><div class="legend-dot" style="background:#888aaa"></div><span class="legend-text">Death — entropy wins</span></div>
+
+  <div class="formula">L = ∫ ||dX|| dt<br>X = (E, I, S, C)<br>X(t+1) = F(Xt,Ut,Kt)</div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div id="ui">
+  <div class="panel-title">Simulation Mode</div>
+  <div class="btn-row">
+    <button class="mode-btn active" id="btn-state" onclick="setMode('state')">STATE-SPACE</button>
+    <button class="mode-btn" id="btn-compare" onclick="setMode('compare')">COMPARE</button>
+  </div>
+  <div id="compare-info" style="display:none">
+    <b style="color:#4a9eff">COMPARE:</b> White = time-linear. Colored = state-space. Watch how they diverge across life phases.
+  </div>
+
+  <div class="panel-title">Simulation</div>
+  <div class="btn-row">
+    <button id="btn-play" onclick="togglePlay()">PAUSE</button>
+    <button onclick="resetSim()">RESET</button>
+  </div>
+
+  <div class="panel-title">Life Span</div>
+  <div class="slider-row">
+    <div class="slider-header"><span class="slider-label">LIFESPAN (steps)</span><span class="slider-val" id="v-ls">300</span></div>
+    <input type="range" min="300" max="3000" step="50" value="1200" id="s-ls" oninput="updateParam('ls',this.value)">
+  </div>
+
+  <div class="panel-title">Life Parameters</div>
+  <div class="slider-group">
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">🌍 LIFE HARDSHIP</span><span class="slider-val" id="v-ep">0.50</span></div>
+      <div class="slider-meaning">How difficult your environment is — poverty, war, disease, social pressure. High = harder life, fewer choices available.</div>
+      <input type="range" min="0" max="1" step="0.01" value="0.5" oninput="updateParam('ep',this.value)">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">⚡ RESOURCES & WEALTH</span><span class="slider-val" id="v-ea">0.70</span></div>
+      <div class="slider-meaning">Access to food, money, health, opportunity. High = you can do more, grow faster, sustain longer.</div>
+      <input type="range" min="0" max="1" step="0.01" value="0.7" oninput="updateParam('ea',this.value)">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">🧠 CURIOSITY & LEARNING</span><span class="slider-val" id="v-ig">0.60</span></div>
+      <div class="slider-meaning">How actively you seek knowledge, skills, new experiences. High = your information dimension grows fast — a richer, more complex inner world.</div>
+      <input type="range" min="0" max="1" step="0.01" value="0.6" oninput="updateParam('ig',this.value)">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">💪 WILL TO LIVE</span><span class="slider-val" id="v-er">0.40</span></div>
+      <div class="slider-meaning">Your resistance to decay, illness, and giving up. High = you fight entropy longer, stay in Peak phase longer, decline more slowly.</div>
+      <input type="range" min="0" max="1" step="0.01" value="0.4" oninput="updateParam('er',this.value)">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">🔒 SOCIAL CONSTRAINTS</span><span class="slider-val" id="v-cs">0.60</span></div>
+      <div class="slider-meaning">Rules, culture, laws, obligations that restrict your choices. High = only safe, conventional paths allowed. Low = freedom to take unusual routes.</div>
+      <input type="range" min="0" max="1" step="0.01" value="0.6" oninput="updateParam('cs',this.value)">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">🎲 RISK TAKING</span><span class="slider-val" id="v-rnd">0.30</span></div>
+      <div class="slider-meaning">How often you choose unexpected or non-optimal paths. High = adventurous, unpredictable life. Low = cautious, always picking the safest option.</div>
+      <input type="range" min="0" max="1" step="0.01" value="0.3" oninput="updateParam('rnd',this.value)">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">🔥 AMBITION & DRIVE</span><span class="slider-val" id="v-ef">0.50</span></div>
+      <div class="slider-meaning">How much energy you actively push through your life. High = bold, fast-moving trajectory. Low = slow, quiet, gentle path through state space.</div>
+      <input type="range" min="0" max="1" step="0.01" value="0.5" oninput="updateParam('ef',this.value)">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-header"><span class="slider-label">🚀 LIFE CHANGE RATE</span><span class="slider-val" id="v-ss">0.40</span></div>
+      <div class="slider-meaning">How dramatically your life changes each step — small daily routines vs. major life leaps. High = big jumps (career change, migration). Low = gradual slow drift.</div>
+      <input type="range" min="0.05" max="1" step="0.01" value="0.4" oninput="updateParam('ss',this.value)">
+    </div>
+
+  </div>
+
+  <div class="panel-title">Camera</div>
+  <div style="font-size:9px;color:#4a7a9a;line-height:1.7">🖱 Drag to orbit &nbsp; Scroll to zoom &nbsp; Right-drag to pan</div>
+</div>
+
+<!-- LIFE ARC BAR -->
+<div id="life-arc-panel">
+  <div id="life-arc-header">
+    <span id="phase-label">BIRTH</span>
+    <span id="age-pct">AGE 0%</span>
+  </div>
+  <div id="life-bar-track"><div id="life-bar-fill"></div></div>
+  <div id="generation-row">
+    <div class="gen-dot-row" id="gen-dots"></div>
+    <span id="gen-label">GENERATION 1</span>
+  </div>
+  <div id="phase-milestones">
+    <span class="milestone" id="ms-birth">BIRTH</span>
+    <span class="milestone" id="ms-growth">GROWTH</span>
+    <span class="milestone" id="ms-peak">PEAK</span>
+    <span class="milestone" id="ms-decline">DECLINE</span>
+    <span class="milestone" id="ms-death">DEATH</span>
+  </div>
+</div>
+
+<!-- INFO BUTTON -->
+<button id="btn-info-open" onclick="document.getElementById('info-overlay').classList.add('open')">? UNDERSTAND THIS SIMULATION</button>
+
+<!-- INFO OVERLAY -->
+<div id="info-overlay">
+<div class="info-wrap">
+  <button id="info-close" onclick="document.getElementById('info-overlay').classList.remove('open')">✕ CLOSE</button>
+  <div class="info-hero">
+    <h1>State-Space Life Model</h1>
+    <p>Life as a trajectory — not a clock</p>
+  </div>
+
+  <div class="info-section">
+    <h2>🧠 The Core Idea</h2>
+    <p>Instead of measuring life by time passing, this model defines life as the <b>total distance a system travels through state space</b>. A rich, complex life = a long exploratory path. A constrained life = a short, collapsing one.</p>
+  </div>
+
+  <div class="info-section">
+    <h2>📐 The Equations</h2>
+    <div class="eq-box">X = (E, I, S, C)<span class="eq-note">State vector: Energy, Information, Entropy, Constraint</span></div>
+    <div class="eq-box">X(t+1) = F(Xt, Ut, Kt)<span class="eq-note">Next state = function of current state + decisions + constraints</span></div>
+    <div class="eq-box">L = ∫ ||dX||<span class="eq-note">Life = total accumulated path length through state space</span></div>
+  </div>
+
+  <div class="info-section">
+    <h2>🌱 The 5 Life Phases</h2>
+    <table class="phase-table">
+      <tr><th>Phase</th><th>Age %</th><th>Ball Color</th><th>What Happens</th></tr>
+      <tr><td>Birth</td><td>0–10%</td><td style="color:#4a9eff">■ Blue</td><td>Small, fragile. Energy builds slowly. Entropy very low. State space exploration just beginning.</td></tr>
+      <tr><td>Growth</td><td>10–40%</td><td style="color:#44ffaa">■ Cyan-Green</td><td>Energy rising, information accumulating fast. Ball grows. Transitions become bolder and wider.</td></tr>
+      <tr><td>Peak</td><td>40–60%</td><td style="color:#ffe066">■ Gold</td><td>Maximum vitality. Largest ball, brightest glow. Energy and information at their highest. Entropy resistance strongest.</td></tr>
+      <tr><td>Decline</td><td>60–85%</td><td style="color:#ff8844">■ Orange</td><td>Energy availability drops. Transitions shrink. Entropy resistance weakens. Path starts collapsing inward.</td></tr>
+      <tr><td>Death</td><td>85–100%</td><td style="color:#888aaa">■ Grey</td><td>System loses coherence. Ball shrinks and dims. Path freezes. Then: rebirth of a new generation begins.</td></tr>
+    </table>
+  </div>
+
+  <div class="info-section">
+    <h2>📊 The 4 State Dimensions</h2>
+    <div class="card-grid">
+      <div class="card"><div class="tag tag-e">X AXIS — RED</div><div class="card-title">E — Energy</div><p>Available energy. High E = bold transitions. Low E = trapped. Peaks at life's peak phase, collapses in decline.</p></div>
+      <div class="card"><div class="tag tag-i">Y AXIS — GREEN</div><div class="card-title">I — Information</div><p>Complexity, memory, structure. Grows through life, slows in decline. The vertical rise of the trajectory.</p></div>
+      <div class="card"><div class="tag tag-s">Z AXIS — BLUE</div><div class="card-title">S — Entropy</div><p>Disorder. Always rising. Entropy resistance fights it — but in decline, the fight weakens and entropy wins.</p></div>
+      <div class="card"><div class="tag tag-c">HIDDEN</div><div class="card-title">C — Constraint</div><p>Environmental interaction. Shapes which transitions are possible. Tightens as the system ages and weakens.</p></div>
+    </div>
+  </div>
+
+  <div class="info-section">
+    <h2>🎛 Sliders Reference</h2>
+    <div class="se-row"><span class="se-name">Lifespan</span><span class="se-desc">How many state transitions constitute one full life. More steps = slower aging, longer exploration.</span></div>
+    <div class="se-row"><span class="se-name">Environment Pressure</span><span class="se-desc">Restricts reachable next states. High = trapped in small region.</span></div>
+    <div class="se-row"><span class="se-name">Energy Availability</span><span class="se-desc">Caps maximum E. Reduced automatically during Decline phase.</span></div>
+    <div class="se-row"><span class="se-name">Information Growth</span><span class="se-desc">How fast I axis increases each step. Boosts trajectory height.</span></div>
+    <div class="se-row"><span class="se-name">Entropy Resistance</span><span class="se-desc">Fights upward S drift. Weakens during Decline. This is the core "life force" parameter.</span></div>
+    <div class="se-row"><span class="se-name">Exploration Randomness</span><span class="se-desc">Temperature of state selection. High = creative/risky. Low = conservative/optimal.</span></div>
+    <div class="se-row"><span class="se-name">Step Size</span><span class="se-desc">Physical scale of each transition. Automatically shrinks in Decline and Death phases.</span></div>
+  </div>
+
+  <div class="info-section">
+    <h2>🔁 Rebirth</h2>
+    <p>When entropy overwhelms the system (Death phase ends), the particle dissolves and a <b>new generation begins</b> at the origin. Each generation inherits a slightly different starting state — simulating how life learns from previous cycles. The generation counter and best trajectory score track across all lives.</p>
+  </div>
+</div>
+</div>
+
+<script>
+// ── PARAMS ───────────────────────────────────────────────────────────────────
+const P = { ep:0.5, ea:0.7, ig:0.6, er:0.4, cs:0.6, rnd:0.3, ef:0.5, ss:0.4, ls:1200 };
+let mode='state', running=true;
+
+function updateParam(k,v) {
+  P[k]=parseFloat(v);
+  const el=document.getElementById('v-'+k);
+  if(el) el.textContent = k==='ls'?parseInt(v):parseFloat(v).toFixed(2);
+}
+function setMode(m) {
+  mode=m;
+  document.getElementById('btn-state').classList.toggle('active',m==='state');
+  document.getElementById('btn-compare').classList.toggle('active',m==='compare');
+  document.getElementById('compare-info').style.display=m==='compare'?'block':'none';
+  resetSim();
+}
+function togglePlay() { running=!running; document.getElementById('btn-play').textContent=running?'PAUSE':'PLAY'; }
+function resetSim() { generation=1; bestL=0; allGenDots=[]; initSimulation(); buildGenDots(); }
+
+// ── LIFE PHASES ──────────────────────────────────────────────────────────────
+const PHASES = [
+  { name:'BIRTH',   start:0,    end:0.10, color:'#4a9eff', barColor:'#4a9eff' },
+  { name:'GROWTH',  start:0.10, end:0.40, color:'#44ffaa', barColor:'#44ffaa' },
+  { name:'PEAK',    start:0.40, end:0.60, color:'#ffe066', barColor:'#ffe066' },
+  { name:'DECLINE', start:0.60, end:0.85, color:'#ff8844', barColor:'#ff8844' },
+  { name:'DEATH',   start:0.85, end:1.00, color:'#888aaa', barColor:'#666688' }
+];
+
+function getPhase(agePct) {
+  return PHASES.find(p => agePct >= p.start && agePct < p.end) || PHASES[4];
+}
+
+function phaseModifiers(agePct) {
+  // Returns multipliers that change behavior per phase
+  if (agePct < 0.10) return { energyMult:0.4, stepMult:0.5, entResMult:0.7, igMult:0.6, size:0.14 };
+  if (agePct < 0.40) return { energyMult:0.7+agePct*0.8, stepMult:0.7+agePct*0.5, entResMult:0.9, igMult:1.2, size:0.14+agePct*0.5 };
+  if (agePct < 0.60) return { energyMult:1.0, stepMult:1.0, entResMult:1.1, igMult:1.0, size:0.36 };
+  if (agePct < 0.85) {
+    const t=(agePct-0.60)/0.25;
+    return { energyMult:1.0-t*0.7, stepMult:1.0-t*0.5, entResMult:1.1-t*0.9, igMult:0.5-t*0.4, size:0.36-t*0.18 };
+  }
+  const t=(agePct-0.85)/0.15;
+  return { energyMult:0.1, stepMult:0.1+t*0.05, entResMult:0.05, igMult:0.0, size:0.18-t*0.12 };
+}
+
+// Ball color interpolation across phases
+function ageBallColor(agePct) {
+  const colors = [
+    {t:0.00, c:new THREE.Color(0x4a9eff)},
+    {t:0.10, c:new THREE.Color(0x44ffaa)},
+    {t:0.40, c:new THREE.Color(0x88ffcc)},
+    {t:0.50, c:new THREE.Color(0xffe066)},
+    {t:0.60, c:new THREE.Color(0xffcc44)},
+    {t:0.75, c:new THREE.Color(0xff8844)},
+    {t:0.85, c:new THREE.Color(0xff5533)},
+    {t:0.92, c:new THREE.Color(0xaa8899)},
+    {t:1.00, c:new THREE.Color(0x444466)}
+  ];
+  for (let i=0; i<colors.length-1; i++) {
+    if (agePct >= colors[i].t && agePct <= colors[i+1].t) {
+      const frac = (agePct-colors[i].t)/(colors[i+1].t-colors[i].t);
+      return new THREE.Color().lerpColors(colors[i].c, colors[i+1].c, frac);
+    }
+  }
+  return colors[colors.length-1].c;
+}
+
+// ── THREE SETUP ──────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050a14);
+scene.fog = new THREE.FogExp2(0x050a14, 0.016);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 500);
+
+let spherical={theta:0.8,phi:0.9,r:30}, panOffset=new THREE.Vector3();
+let isDragging=false, isRight=false, lastX=0, lastY=0;
+renderer.domElement.addEventListener('mousedown',e=>{isDragging=true;isRight=e.button===2;lastX=e.clientX;lastY=e.clientY;});
+renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('mouseup',()=>isDragging=false);
+window.addEventListener('mousemove',e=>{
+  if(!isDragging)return;
+  const dx=(e.clientX-lastX)*0.005, dy=(e.clientY-lastY)*0.005;
+  if(isRight){const r=new THREE.Vector3();camera.getWorldDirection(r);r.cross(camera.up).normalize();panOffset.addScaledVector(r,-dx*spherical.r*0.5);panOffset.addScaledVector(camera.up,dy*spherical.r*0.5);}
+  else{spherical.theta-=dx;spherical.phi=Math.max(0.1,Math.min(Math.PI-0.1,spherical.phi+dy));}
+  lastX=e.clientX;lastY=e.clientY;updateCamera();
+});
+renderer.domElement.addEventListener('wheel',e=>{spherical.r=Math.max(5,Math.min(80,spherical.r+e.deltaY*0.04));updateCamera();});
+function updateCamera(){
+  camera.position.set(panOffset.x+spherical.r*Math.sin(spherical.phi)*Math.sin(spherical.theta),panOffset.y+spherical.r*Math.cos(spherical.phi),panOffset.z+spherical.r*Math.sin(spherical.phi)*Math.cos(spherical.theta));
+  camera.lookAt(panOffset);
+}
+
+// ── SCENE BUILD ──────────────────────────────────────────────────────────────
+function buildScene(){
+  while(scene.children.length>0) scene.remove(scene.children[0]);
+  scene.add(new THREE.AmbientLight(0x112244,1.5));
+  const pl=new THREE.PointLight(0x4a9eff,2,60);pl.position.set(0,15,0);scene.add(pl);
+  const gridMat=new THREE.LineBasicMaterial({color:0x0d2040,transparent:true,opacity:0.5});
+  const N=20,half=10;
+  for(let i=-N/2;i<=N/2;i++){
+    const s=i*(20/N);
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-half,0,s),new THREE.Vector3(half,0,s)]),gridMat));
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(s,0,-half),new THREE.Vector3(s,0,half)]),gridMat));
+  }
+  const sideM=new THREE.LineBasicMaterial({color:0x071828,transparent:true,opacity:0.3});
+  for(let i=-N/2;i<=N/2;i++){
+    const s=i*(20/N);
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-half,s,-half),new THREE.Vector3(half,s,-half)]),sideM));
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(s,-half,-half),new THREE.Vector3(s,half,-half)]),sideM));
+  }
+  const ax=[{dir:[1,0,0],color:0xff4466,label:'E (Energy)'},{dir:[0,1,0],color:0x44ff88,label:'I (Info)'},{dir:[0,0,1],color:0x4488ff,label:'S (Entropy)'}];
+  ax.forEach(a=>{
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(...a.dir).multiplyScalar(12)]),new THREE.LineBasicMaterial({color:a.color})));
+    const cv=document.createElement('canvas');cv.width=160;cv.height=36;
+    const cx=cv.getContext('2d');cx.font='bold 18px Courier New';cx.fillStyle='#'+a.color.toString(16).padStart(6,'0');cx.fillText(a.label,4,26);
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthTest:false}));
+    sp.scale.set(3.2,0.75,1);sp.position.set(...a.dir).multiplyScalar(13.5);scene.add(sp);
+  });
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(0.15,12,12),new THREE.MeshStandardMaterial({color:0x4a9eff,emissive:0x4a9eff,emissiveIntensity:1})));
+}
+
+// ── SIMULATION ───────────────────────────────────────────────────────────────
+let particle, trailLine, trailPoints=[], metrics, simState;
+let compareTrailLine, comparePoints=[];
+let candidateSpheres=[];
+let lerpCurrent, lerpTarget, lerpT=1;
+let generation=1, bestL=0, allGenDots=[];
+let ageStep=0, dying=false, deathProgress=0;
+let lastPhase='';
+
+function stateToWorld(s){ return new THREE.Vector3(s.E*8,s.I*8,s.S*8); }
+
+function utility(curr,next,mod){
+  return (next.E-curr.E)*P.ea*mod.energyMult + (next.I-curr.I)*P.ig*mod.igMult - (next.S-curr.S)*P.er*mod.entResMult + (Math.random()-0.5)*P.rnd*2;
+}
+function allowed(curr,next,mod){
+  if(next.E > P.ea*mod.energyMult*1.1-0.05) return false;
+  const dS=next.S-curr.S;
+  if(dS>(1-P.er*mod.entResMult)*P.ss*mod.stepMult*1.5) return false;
+  const dist=Math.sqrt((next.E-curr.E)**2+(next.I-curr.I)**2+(next.S-curr.S)**2);
+  if(dist>P.ss*mod.stepMult*(1.5-P.ep*0.8)) return false;
+  return true;
+}
+function generateCandidates(curr,mod){
+  const N=8,cands=[];
+  for(let i=0;i<N*4;i++){
+    const step=P.ss*mod.stepMult*0.6;
+    const theta=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1),r=step*(0.4+Math.random()*0.6);
+    const next={
+      E:curr.E+r*Math.sin(phi)*Math.cos(theta),
+      I:curr.I+r*Math.sin(phi)*Math.sin(theta)+P.ig*mod.igMult*0.04,
+      S:curr.S+r*Math.cos(phi)*0.5+0.01*(1-P.er*mod.entResMult),
+      C:curr.C+(Math.random()-0.5)*0.1
+    };
+    ['E','I','S','C'].forEach(k=>next[k]=Math.max(-1,Math.min(1,next[k])));
+    if(allowed(curr,next,mod)) cands.push(next);
+    if(cands.length>=N) break;
+  }
+  return cands;
+}
+function selectNext(curr,cands,mod){
+  if(cands.length===0) return {E:curr.E+(Math.random()-0.5)*0.03,I:curr.I+0.01*mod.igMult,S:curr.S+0.02*(1-P.er*mod.entResMult),C:curr.C+(Math.random()-0.5)*0.05};
+  const scores=cands.map(c=>utility(curr,c,mod));
+  const maxS=Math.max(...scores);
+  const exps=scores.map(s=>Math.exp((s-maxS)/Math.max(0.05,P.rnd)));
+  const total=exps.reduce((a,b)=>a+b,0);
+  let r=Math.random()*total;
+  for(let i=0;i<cands.length;i++){r-=exps[i];if(r<=0)return cands[i];}
+  return cands[cands.length-1];
+}
+
+function initSimulation(){
+  if(particle) scene.remove(particle);
+  if(trailLine) scene.remove(trailLine);
+  if(compareTrailLine) scene.remove(compareTrailLine);
+  candidateSpheres.forEach(s=>scene.remove(s));
+  candidateSpheres=[];
+
+  // Slight variation each generation
+  const jitter=(generation-1)*0.05;
+  simState={E:0+jitter*0.1,I:0,S:-0.85+jitter*0.05,C:0};
+  trailPoints=[stateToWorld(simState).clone()];
+  comparePoints=[new THREE.Vector3(0,0,0)];
+  metrics={L:0,transitions:0,magnitudes:[],entRate:0};
+  lerpCurrent=stateToWorld(simState).clone();
+  lerpTarget=lerpCurrent.clone();
+  lerpT=1;
+  ageStep=0;
+  dying=false;
+  deathProgress=0;
+  lastPhase='';
+
+  const geo=new THREE.SphereGeometry(0.22,16,16);
+  const mat=new THREE.MeshStandardMaterial({color:0x4a9eff,emissive:0x4a9eff,emissiveIntensity:3,transparent:true,opacity:1});
+  particle=new THREE.Mesh(geo,mat);
+  particle.position.copy(lerpCurrent);
+  scene.add(particle);
+
+  trailLine=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({vertexColors:true}));
+  scene.add(trailLine);
+
+  if(mode==='compare'){
+    compareTrailLine=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.35}));
+    scene.add(compareTrailLine);
+  }
+  for(let i=0;i<8;i++){
+    const cs=new THREE.Mesh(new THREE.SphereGeometry(0.07,8,8),new THREE.MeshStandardMaterial({color:0xaabbff,emissive:0x334466,emissiveIntensity:1,transparent:true,opacity:0.4}));
+    scene.add(cs);cs.visible=false;candidateSpheres.push(cs);
+  }
+
+  updateLifeBar(0, PHASES[0]);
+}
+
+// ── GENERATION DOTS ──────────────────────────────────────────────────────────
+const MAX_GEN_DOTS=10;
+function buildGenDots(){
+  const container=document.getElementById('gen-dots');
+  container.innerHTML='';
+  for(let i=0;i<MAX_GEN_DOTS;i++){
+    const d=document.createElement('div');
+    d.className='gen-dot'+(i<generation?' lived':'');
+    container.appendChild(d);
+  }
+  document.getElementById('gen-label').textContent=`GENERATION ${generation}`;
+  document.getElementById('m-gen').textContent=generation;
+}
+
+// ── LIFE BAR ─────────────────────────────────────────────────────────────────
+function updateLifeBar(agePct, phase){
+  const fill=document.getElementById('life-bar-fill');
+  fill.style.width=(agePct*100).toFixed(1)+'%';
+  fill.style.background=`linear-gradient(90deg, #4a9eff, ${phase.barColor})`;
+  document.getElementById('phase-label').textContent=phase.name;
+  document.getElementById('phase-label').style.color=phase.color;
+  document.getElementById('age-pct').textContent=`AGE ${(agePct*100).toFixed(0)}%`;
+  const ids=['birth','growth','peak','decline','death'];
+  ids.forEach((id,i)=>{
+    const el=document.getElementById('ms-'+id);
+    if(el) el.className='milestone'+(PHASES[i].name===phase.name?' active':'');
+  });
+}
+
+// ── PHASE FLASH ──────────────────────────────────────────────────────────────
+function flashPhase(phase){
+  const overlay=document.getElementById('phase-flash');
+  const txt=document.getElementById('phase-flash-text');
+  txt.textContent=phase.name;
+  txt.style.color=phase.color;
+  overlay.style.background=phase.color.replace('#','rgba(').replace(/(..)(..)(..)/, (_,r,g,b)=>`rgba(${parseInt(r,16)},${parseInt(g,16)},${parseInt(b,16)},0.08)`);
+  overlay.style.opacity='1';
+  setTimeout(()=>overlay.style.opacity='0',900);
+}
+
+// ── TRAIL GEOMETRY ───────────────────────────────────────────────────────────
+function updateTrailGeometry(agePct){
+  if(trailPoints.length<2)return;
+  const pts=trailPoints.slice(-500);
+  const N=pts.length;
+  const pos=new Float32Array(N*3), col=new Float32Array(N*3);
+  for(let i=0;i<N;i++){
+    pos[i*3]=pts[i].x;pos[i*3+1]=pts[i].y;pos[i*3+2]=pts[i].z;
+    const t=i/(N-1);
+    const c=ageBallColor(t*agePct);
+    col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  trailLine.geometry.dispose();trailLine.geometry=geo;
+}
+function updateCompareTrail(){
+  if(!compareTrailLine||comparePoints.length<2)return;
+  compareTrailLine.geometry.dispose();
+  compareTrailLine.geometry=new THREE.BufferGeometry().setFromPoints(comparePoints.slice(-500));
+}
+
+// ── DEATH & REBIRTH ──────────────────────────────────────────────────────────
+function triggerDeath(){
+  dying=true; deathProgress=0;
+  if(metrics.L>bestL){ bestL=metrics.L; document.getElementById('m-best').textContent=bestL.toFixed(3); }
+}
+function processDeathRebirth(){
+  deathProgress+=0.025;
+  if(particle){
+    particle.material.opacity=Math.max(0,1-deathProgress*1.5);
+    particle.scale.setScalar(Math.max(0.01,1-deathProgress));
+  }
+  if(deathProgress>=1){
+    dying=false;
+    generation++;
+    if(generation<=MAX_GEN_DOTS) buildGenDots();
+    else{ document.getElementById('m-gen').textContent=generation; document.getElementById('gen-label').textContent=`GENERATION ${generation}`; }
+    initSimulation();
+    flashPhase(PHASES[0]);
+  }
+}
+
+// ── ANIMATION LOOP ───────────────────────────────────────────────────────────
+let frameCount=0, glowPulse=0;
+function animate(){
+  requestAnimationFrame(animate);
+  glowPulse=(glowPulse+0.04)%(Math.PI*2);
+
+  if(running){
+    if(dying){ processDeathRebirth(); renderer.render(scene,camera); return; }
+
+    frameCount++;
+
+    // Lerp
+    if(lerpT<1){
+      lerpT=Math.min(1,lerpT+0.12);
+      particle.position.copy(lerpCurrent.clone().lerp(lerpTarget,lerpT));
+    }
+
+    if(frameCount%10===0){
+      ageStep++;
+      const agePct=Math.min(1,ageStep/P.ls);
+      const phase=getPhase(agePct);
+      const mod=phaseModifiers(agePct);
+
+      // Phase change flash
+      if(phase.name!==lastPhase){ flashPhase(phase); lastPhase=phase.name; }
+
+      // Trigger death
+      if(agePct>=1){ triggerDeath(); return; }
+
+      const cands=generateCandidates(simState,mod);
+      const next=selectNext(simState,cands,mod);
+      const wCurr=stateToWorld(simState), wNext=stateToWorld(next);
+      const mag=wCurr.distanceTo(wNext);
+
+      metrics.L+=mag; metrics.transitions++; metrics.magnitudes.push(mag);
+      if(metrics.magnitudes.length>50) metrics.magnitudes.shift();
+      metrics.entRate=next.S-simState.S;
+      simState=next;
+
+      lerpCurrent.copy(particle.position);
+      lerpTarget.copy(wNext); lerpT=0;
+      trailPoints.push(wNext.clone());
+
+      // Update particle appearance
+      const ballCol=ageBallColor(agePct);
+      particle.material.color.copy(ballCol);
+      particle.material.emissive.copy(ballCol);
+      particle.material.opacity=1;
+      const sz=mod.size*(1+Math.sin(glowPulse)*0.08);
+      particle.scale.setScalar(sz/0.22);
+      const phase_emissive = agePct<0.85 ? 2+Math.sin(glowPulse)*(1-agePct*0.8) : 0.5;
+      particle.material.emissiveIntensity=phase_emissive;
+
+      updateTrailGeometry(agePct);
+      updateLifeBar(agePct,phase);
+
+      if(mode==='compare'){
+        const t=metrics.transitions;
+        comparePoints.push(new THREE.Vector3(Math.sin(t*0.08)*6,t*0.025-5,Math.cos(t*0.06)*4));
+        updateCompareTrail();
+      }
+
+      // Candidates
+      cands.forEach((c,i)=>{ if(i<candidateSpheres.length){ candidateSpheres[i].position.copy(stateToWorld(c)); candidateSpheres[i].visible=true; }});
+      for(let i=cands.length;i<candidateSpheres.length;i++) candidateSpheres[i].visible=false;
+
+      // UI
+      document.getElementById('sv-e').textContent=simState.E.toFixed(3);
+      document.getElementById('sv-i').textContent=simState.I.toFixed(3);
+      document.getElementById('sv-s').textContent=simState.S.toFixed(3);
+      document.getElementById('sv-c').textContent=simState.C.toFixed(3);
+      document.getElementById('m-traj').textContent=metrics.L.toFixed(3);
+      document.getElementById('m-trans').textContent=metrics.transitions;
+      const avg=metrics.magnitudes.reduce((a,b)=>a+b,0)/Math.max(1,metrics.magnitudes.length);
+      document.getElementById('m-avg').textContent=avg.toFixed(3);
+      document.getElementById('m-cur').textContent=mag.toFixed(3);
+      document.getElementById('m-ent').textContent=(metrics.entRate>=0?'+':'')+metrics.entRate.toFixed(4);
+      document.getElementById('m-best').textContent=Math.max(bestL,metrics.L).toFixed(3);
+    }
+  }
+  renderer.render(scene,camera);
+}
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+buildScene();
+buildGenDots();
+initSimulation();
+updateCamera();
+animate();
+
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+</body>
+</html>
